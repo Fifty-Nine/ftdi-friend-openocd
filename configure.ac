@@ -132,7 +132,8 @@ m4_define([HIDAPI_ADAPTERS],
 m4_define([LIBFTDI_ADAPTERS],
 	[[[usb_blaster], [Altera USB-Blaster Compatible], [USB_BLASTER]],
 	[[presto], [ASIX Presto Adapter], [PRESTO]],
-	[[openjtag], [OpenJTAG Adapter], [OPENJTAG]]])
+	[[openjtag], [OpenJTAG Adapter], [OPENJTAG]],
+  [[ftdi_friend], [Adafruit FTDI Friend board], [FTDI_FRIEND]]])
 
 m4_define([LIBJAYLINK_ADAPTERS],
 	[[[jlink], [SEGGER J-Link Programmer], [JLINK]]])

@@ -73,6 +73,9 @@ endif
 if FTDI
 DRIVERFILES += %D%/ftdi.c %D%/mpsse.c
 endif
+if FTDI_FRIEND
+DRIVERFILES += %D%/ftdi_friend.c
+endif
 if JTAG_VPI
 DRIVERFILES += %D%/jtag_vpi.c
 endif
