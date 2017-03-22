@@ -219,6 +219,24 @@ static int handle_scan(struct jtag_command *cmd)
 
 static int handle_tlr_reset(struct jtag_command *cmd)
 {
+    __auto_type sm = cmd->cmd.statemove;
+
+    assert(tap_is_state_stable(sm->end_state));
+    tap_set_end_state(sm->end_state);
+
+    uint8_t data = tap_get_tms_path(tap_get_state(), tap_get_end_state());
+    int count = tap_get_tms_path_len(tap_get_state(), tap_get_end_state());
+
+    assert(count <= 8);
+
+    for (int i = 0; i < count; ++i, data >>= 1) {
+        write_data_pins(0, data & 1, 0);
+        write_data_pins(1, data & 1, 0);
+    }
+    write_data_pins(0, 0, 0);
+
+    tap_set_state(tap_get_end_state());
+
     return ERROR_OK;
 }
 
