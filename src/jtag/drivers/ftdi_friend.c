@@ -49,8 +49,8 @@ enum ft232r_pins {
     PIN_RI  = 0x80,
 
     /* These are aliases for the JTAG pins. */
-    PIN_TCK = PIN_TXD,
-    PIN_TDO = PIN_RXD,
+    PIN_TCK = PIN_RXD,
+    PIN_TDO = PIN_TXD,
     PIN_TDI = PIN_RTS,
     PIN_TMS = PIN_CTS,
 
