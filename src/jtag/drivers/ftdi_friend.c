@@ -278,9 +278,75 @@ static int ftdi_friend_khz(int khz, int *jtag_speed)
     return ERROR_OK;
 }
 
+static void read_rx_buffer(uint8_t *scan_buffer, int scan_size, int skip)
+{
+    /*
+     * rx buffer is organized with two samples per clock, and we want
+     * the data on the rising clock edge, so offset by one.
+     */
+    const uint8_t *rx_head = rx_buffer.data + 1 + skip;
+    uint8_t *out_head = scan_buffer;
+    const int bytes = scan_size / CHAR_BIT;
+
+    for (int offset = 0; offset < bytes; ++offset) {
+        for (int bit = 0; bit < CHAR_BIT; ++bit) {
+            *out_head >>= 1;
+            *out_head |= (*rx_head & PIN_TDO) ? 0x80 : 0x00;
+            rx_head += 2;
+        }
+        ++out_head;
+    }
+}
+
 static int handle_scan(struct jtag_command *cmd)
 {
-    return ERROR_OK;
+    __auto_type scan = cmd->cmd.scan;
+
+    tap_set_end_state(scan->end_state);
+    uint8_t *scan_buffer;
+    int scan_size = jtag_build_buffer(scan, &scan_buffer);
+    enum scan_type type = jtag_scan_type(scan);
+
+    __auto_type saved_end_state = tap_get_end_state();
+
+    if ((scan->ir_scan || (tap_get_state() != TAP_DRSHIFT)) &&
+        (!scan->ir_scan || (tap_get_state() != TAP_IRSHIFT)))
+    {
+        tap_set_end_state(scan->ir_scan ? TAP_IRSHIFT : TAP_DRSHIFT);
+        state_transition();
+        tap_set_end_state(saved_end_state);
+    }
+
+    int skip = tx_buffer.available;
+
+    {
+        int tms_extractor(const uint8_t *data, int idx) {
+            return idx == (scan_size - 1);
+        }
+        int tdi_extractor(const uint8_t *data, int idx) {
+            return (type != SCAN_IN) && default_extractor(data, idx);
+        }
+
+        write_pulse_train_full(
+            NULL, scan_buffer, scan_size, tms_extractor, tdi_extractor
+        );
+    }
+
+    if (tap_get_state() != tap_get_end_state()) {
+        state_transition();
+    }
+    flush_buffers();
+
+    if (type != SCAN_OUT) {
+        read_rx_buffer(scan_buffer, scan_size, skip);
+    }
+
+    int rc = (jtag_read_buffer(scan_buffer, scan) == ERROR_OK) ?
+        ERROR_OK : ERROR_JTAG_QUEUE_FAILED;
+
+    free(scan_buffer);
+
+    return rc;
 }
 
 static int handle_tlr_reset(struct jtag_command *cmd)
