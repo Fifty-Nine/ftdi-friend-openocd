@@ -187,6 +187,16 @@ static void write_data_pins(int tck, int tms, int tdi)
     );
 }
 
+static void write_reset_pins(int trst, int srst)
+{
+    buffer_enqueue(
+        &tx_buffer,
+        (trst ? 0 : PIN_TRST) |
+        (srst ? 0 : PIN_SRST)
+    );
+}
+
+
 static int ftdi_friend_speed(int speed)
 {
     return ERROR_OK;
@@ -219,6 +229,14 @@ static int handle_runtest(struct jtag_command *cmd)
 
 static int handle_reset(struct jtag_command *cmd)
 {
+    __auto_type reset = cmd->cmd.reset;
+
+    if (reset->trst ||
+        (reset->srst && (jtag_get_reset_config() & RESET_SRST_PULLS_TRST))) {
+        tap_set_state(TAP_RESET);
+    }
+    write_reset_pins(reset->trst, reset->srst);
+
     return ERROR_OK;
 }
 
