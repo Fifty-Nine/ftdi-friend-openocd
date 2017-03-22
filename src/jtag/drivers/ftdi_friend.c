@@ -260,6 +260,20 @@ static int handle_reset(struct jtag_command *cmd)
 
 static int handle_pathmove(struct jtag_command *cmd)
 {
+    __auto_type pm = cmd->cmd.pathmove;
+
+    for (int i = 0; i < pm->num_states; ++i) {
+        int tms = tap_state_transition(tap_get_state(), true) == pm->path[i];
+        assert(tms || (tap_state_transition(tap_get_state(), false) == pm->path[i]));
+
+        write_data_pins(0, tms, 0);
+        write_data_pins(1, tms, 0);
+
+        tap_set_state(pm->path[i]);
+    }
+
+    write_data_pins(0, 0, 0);
+
     return ERROR_OK;
 }
 
