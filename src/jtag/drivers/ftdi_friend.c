@@ -87,18 +87,22 @@ static int ftdi_friend_init(void)
         return ERROR_FAIL;
     }
 
-    int rc;
-    if ((rc = ftdi_usb_open(ftdi, ftdi_friend_vid, ftdi_friend_pid))) {
+    if (ftdi_usb_open(ftdi, ftdi_friend_vid, ftdi_friend_pid)) {
         return on_ftdi_error("ftdi_usb_open");
     }
 
-    if ((rc = ftdi_set_bitmode(ftdi, ftdi_output_mask, BITMODE_SYNCBB))) {
+    if (ftdi_set_bitmode(ftdi, ftdi_output_mask, BITMODE_SYNCBB)) {
         return on_ftdi_error("ftdi_set_bitmode");
     }
 
-    if ((rc = ftdi_set_latency_timer(ftdi, latency_timer))) {
+    if ( ftdi_set_latency_timer(ftdi, latency_timer)) {
         return on_ftdi_error("ftdi_set_latency_timer");
     }
+
+    if (ftdi_set_baudrate(ftdi, 11520)) {
+        return on_ftdi_error("ftdi_set_baudrate");
+    }
+
     return ERROR_OK;
 }
 
