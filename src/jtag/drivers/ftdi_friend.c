@@ -185,8 +185,7 @@ static int ftdi_friend_quit(void)
 {
     if (!ftdi) return ERROR_OK;
 
-    int rc;
-    if ((rc = ftdi_usb_close(ftdi))) {
+    if (ftdi_usb_close(ftdi)) {
         return on_ftdi_error("ftdi_usb_close");
     }
 
