@@ -27,14 +27,87 @@
 #include <jtag/commands.h>
 #include <ftdi.h>
 
+struct ftdi_context *ftdi;
+static const int ftdi_friend_vid = 0x0403;
+static const int ftdi_friend_pid = 0x6001;
+
+enum ft232r_pins {
+    PIN_TXD = 0x01,
+    PIN_RXD = 0x02,
+    PIN_RTS = 0x04,
+    PIN_CTS = 0x08,
+
+    /*
+     * This pin is unconnected by default but can be connected to the
+     * RTS output on the 6-pin header.
+     */
+    PIN_DTR = 0x10,
+
+    /* These are unconnected on the FTDI friend. */
+    PIN_DSR = 0x20,
+    PIN_DCD = 0x04,
+    PIN_RI  = 0x80,
+
+    /* These are aliases for the JTAG pins. */
+    PIN_TCK = PIN_TXD,
+    PIN_TDO = PIN_RXD,
+    PIN_TDI = PIN_RTS,
+    PIN_TMS = PIN_CTS,
+
+    /*
+     * Using the TRST pin requires soldering an extra wire to the DTR pad on
+     * the bottom of the FTDI friend.
+     */
+    PIN_TRST = PIN_DTR,
+
+    /*
+     * Good luck connecting this pin. You will likely need some kind of
+     * specialized equipment like fine-pitch probes or a 28-SSOP test clip.
+     */
+    PIN_SRST = PIN_DSR
+};
+
+static const uint8_t ftdi_output_mask =
+    PIN_TDI | PIN_TMS | PIN_TCK | PIN_TRST | PIN_SRST;
+
+
+static int on_ftdi_error(const char *when)
+{
+    LOG_ERROR("libftdi call failed: %s: %s", when, ftdi_get_error_string(ftdi));
+    ftdi_free(ftdi);
+    ftdi = NULL;
+    return ERROR_FAIL;
+}
 
 static int ftdi_friend_init(void)
 {
+    if ((ftdi = ftdi_new()) == 0) {
+        LOG_ERROR("ftdi_new failed");
+        return ERROR_FAIL;
+    }
+
+    int rc;
+    if ((rc = ftdi_usb_open(ftdi, ftdi_friend_vid, ftdi_friend_pid))) {
+        return on_ftdi_error("ftdi_usb_open");
+    }
+
+    if ((rc = ftdi_set_bitmode(ftdi, ftdi_output_mask, BITMODE_SYNCBB))) {
+        return on_ftdi_error("ftdi_set_bitmode");
+    }
     return ERROR_OK;
 }
 
 static int ftdi_friend_quit(void)
 {
+    if (!ftdi) return ERROR_OK;
+
+    int rc;
+    if ((rc = ftdi_usb_close(ftdi))) {
+        return on_ftdi_error("ftdi_usb_close");
+    }
+
+    ftdi_free(ftdi);
+    ftdi = NULL;
     return ERROR_OK;
 }
 
