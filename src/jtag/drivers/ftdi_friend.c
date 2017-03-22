@@ -224,13 +224,33 @@ static void idle(void) {
     write_data_pins(0, 0, 0);
 }
 
-static void write_tms_pulse_train(uint8_t data, int count)
+typedef int (*bit_extractor)(const uint8_t *data, int bit_idx);
+
+static int default_extractor(const uint8_t *data, int bit_idx)
 {
-    assert(count <= 8);
-    for (int i = 0; i < count; ++i, data >>= 1) {
-        clock_data(data & 1, 0);
+    int offset = bit_idx / 8;
+    int shift = bit_idx % 8;
+    return data && ((data[offset] >> shift) & 0x01);
+}
+
+static void write_pulse_train_full(
+    const uint8_t *tms_data, const uint8_t *tdi_data, int count,
+    bit_extractor tms_extractor, bit_extractor tdi_extractor)
+{
+    for (int i = 0; i < count; ++i)
+    {
+        int tms = tms_extractor(tms_data, i);
+        int tdi = tdi_extractor(tdi_data, i);
+        clock_data(tms, tdi);
     }
     idle();
+}
+
+static void write_pulse_train(const uint8_t *tms_data, const uint8_t *tdi_data, int count)
+{
+    write_pulse_train_full(
+        tms_data, tdi_data, count, default_extractor, default_extractor
+    );
 }
 
 static void state_transition(void)
@@ -238,7 +258,7 @@ static void state_transition(void)
     uint8_t data = tap_get_tms_path(tap_get_state(), tap_get_end_state());
     int count = tap_get_tms_path_len(tap_get_state(), tap_get_end_state());
 
-    write_tms_pulse_train(data, count);
+    write_pulse_train(&data, NULL, count);
 
     tap_set_state(tap_get_end_state());
 }
@@ -286,7 +306,7 @@ static int handle_runtest(struct jtag_command *cmd)
         state_transition();
     }
 
-    write_tms_pulse_train(0, rt->num_cycles);
+    write_pulse_train(NULL, NULL, rt->num_cycles);
 
     tap_set_end_state(rt->end_state);
     if (tap_get_state() != tap_get_end_state()) {
@@ -313,14 +333,14 @@ static int handle_pathmove(struct jtag_command *cmd)
 {
     __auto_type pm = cmd->cmd.pathmove;
 
-    for (int i = 0; i < pm->num_states; ++i) {
-        int tms = tap_state_transition(tap_get_state(), true) == pm->path[i];
-        assert(tms || (tap_state_transition(tap_get_state(), false) == pm->path[i]));
-
-        clock_data(tms, 0);
-
-        tap_set_state(pm->path[i]);
+    int path_extractor(const uint8_t *data, int idx) {
+        int rc = tap_state_transition(tap_get_state(), true) == pm->path[idx];
+        assert(rc || (tap_state_transition(tap_get_state(), false) == pm->path[idx]));
+        tap_set_state(pm->path[idx]);
+        return rc;
     }
+
+    write_pulse_train_full(NULL, NULL, pm->num_states, path_extractor, NULL);
 
     idle();
 
@@ -337,10 +357,11 @@ static int handle_stableclocks(struct jtag_command *cmd)
 {
     int tms = tap_get_state() == TAP_RESET;
     int num_cycles = cmd->cmd.stableclocks->num_cycles;
-    for (int i = 0; i < num_cycles; ++i)
-    {
-        clock_data(tms, 0);
-    }
+
+    int extractor(const uint8_t* d, int i) { return tms; }
+
+    write_pulse_train_full(NULL, NULL, num_cycles, extractor, NULL);
+
     return ERROR_OK;
 }
 
@@ -348,10 +369,7 @@ static int handle_tms(struct jtag_command *cmd)
 {
     __auto_type tms = cmd->cmd.tms;
 
-    for (unsigned i = 0; i < tms->num_bits; ++i) {
-        int bit = (tms->bits[i / 8] >> (i % 8)) & 1;
-        clock_data(bit, 0);
-    }
+    write_pulse_train(tms->bits, NULL, tms->num_bits);
 
     idle();
 
