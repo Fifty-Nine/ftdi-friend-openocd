@@ -196,6 +196,25 @@ static void write_reset_pins(int trst, int srst)
     );
 }
 
+static void write_tms_pulse_train(uint8_t data, int count)
+{
+    assert(count <= 8);
+    for (int i = 0; i < count; ++i, data >>= 1) {
+        write_data_pins(0, data & 1, 0);
+        write_data_pins(1, data & 1, 0);
+    }
+    write_data_pins(0, 0, 0);
+}
+
+static void state_transition(void)
+{
+    uint8_t data = tap_get_tms_path(tap_get_state(), tap_get_end_state());
+    int count = tap_get_tms_path_len(tap_get_state(), tap_get_end_state());
+
+    write_tms_pulse_train(data, count);
+
+    tap_set_state(tap_get_end_state());
+}
 
 static int ftdi_friend_speed(int speed)
 {
@@ -224,24 +243,29 @@ static int handle_tlr_reset(struct jtag_command *cmd)
     assert(tap_is_state_stable(sm->end_state));
     tap_set_end_state(sm->end_state);
 
-    uint8_t data = tap_get_tms_path(tap_get_state(), tap_get_end_state());
-    int count = tap_get_tms_path_len(tap_get_state(), tap_get_end_state());
-
-    assert(count <= 8);
-
-    for (int i = 0; i < count; ++i, data >>= 1) {
-        write_data_pins(0, data & 1, 0);
-        write_data_pins(1, data & 1, 0);
-    }
-    write_data_pins(0, 0, 0);
-
-    tap_set_state(tap_get_end_state());
+    state_transition();
 
     return ERROR_OK;
 }
 
 static int handle_runtest(struct jtag_command *cmd)
 {
+    __auto_type rt = cmd->cmd.runtest;
+    assert(tap_is_state_stable(rt->end_state));
+    tap_set_end_state(rt->end_state);
+
+    if (tap_get_state() != TAP_IDLE) {
+        tap_set_end_state(TAP_IDLE);
+        state_transition();
+    }
+
+    write_tms_pulse_train(0, rt->num_cycles);
+
+    tap_set_end_state(rt->end_state);
+    if (tap_get_state() != tap_get_end_state()) {
+        state_transition();
+    }
+
     return ERROR_OK;
 }
 
