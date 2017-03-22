@@ -264,6 +264,17 @@ static int handle_stableclocks(struct jtag_command *cmd)
 
 static int handle_tms(struct jtag_command *cmd)
 {
+    __auto_type tms = cmd->cmd.tms;
+
+    for (unsigned i = 0; i < tms->num_bits; ++i) {
+        int bit = (tms->bits[i / 8] >> (i % 8)) & 1;
+        write_data_pins(0, bit, 0);
+        write_data_pins(1, bit, 0);
+    }
+    write_data_pins(0, 0, 0);
+
+    tap_set_state(tap_get_end_state());
+
     return ERROR_OK;
 }
 
