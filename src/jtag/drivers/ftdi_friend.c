@@ -247,6 +247,7 @@ static int handle_pathmove(struct jtag_command *cmd)
 
 static int handle_sleep(struct jtag_command *cmd)
 {
+    jtag_sleep(cmd->cmd.sleep->us);
     return ERROR_OK;
 }
 
