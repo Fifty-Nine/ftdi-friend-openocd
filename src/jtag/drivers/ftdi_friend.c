@@ -135,8 +135,73 @@ static int ftdi_friend_khz(int khz, int *jtag_speed)
     return ERROR_OK;
 }
 
+static int handle_scan(struct jtag_command *cmd)
+{
+    return ERROR_OK;
+}
+
+static int handle_tlr_reset(struct jtag_command *cmd)
+{
+    return ERROR_OK;
+}
+
+static int handle_runtest(struct jtag_command *cmd)
+{
+    return ERROR_OK;
+}
+
+static int handle_reset(struct jtag_command *cmd)
+{
+    return ERROR_OK;
+}
+
+static int handle_pathmove(struct jtag_command *cmd)
+{
+    return ERROR_OK;
+}
+
+static int handle_sleep(struct jtag_command *cmd)
+{
+    return ERROR_OK;
+}
+
+static int handle_stableclocks(struct jtag_command *cmd)
+{
+    return ERROR_OK;
+}
+
+static int handle_tms(struct jtag_command *cmd)
+{
+    return ERROR_OK;
+}
+
+static int (* const jtag_cmd_handlers[])(struct jtag_command *cmd) = {
+    [JTAG_SCAN]         = handle_scan,
+    [JTAG_TLR_RESET]    = handle_tlr_reset,
+    [JTAG_RUNTEST]      = handle_runtest,
+    [JTAG_RESET]        = handle_reset,
+    [JTAG_PATHMOVE]     = handle_pathmove,
+    [JTAG_SLEEP]        = handle_sleep,
+    [JTAG_STABLECLOCKS] = handle_stableclocks,
+    [JTAG_TMS]          = handle_tms,
+};
+
+static int execute_one_command(struct jtag_command *cmd)
+{
+    assert(cmd->type < sizeof(jtag_cmd_handlers));
+    if (!buffer_empty(&tx_buffer)) {
+        flush_buffers();
+    }
+    return jtag_cmd_handlers[cmd->type](cmd);
+}
+
 static int ftdi_friend_execute_queue(void)
 {
+    for (struct jtag_command *cmd = jtag_command_queue;
+         cmd != NULL;
+         cmd = cmd->next) {
+        execute_one_command(cmd);
+    }
     return ERROR_OK;
 }
 
