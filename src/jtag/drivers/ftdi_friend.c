@@ -171,6 +171,22 @@ static int ftdi_friend_quit(void)
     return ERROR_OK;
 }
 
+static void write_data_pins(int tck, int tms, int tdi)
+{
+    if (buffer_full(&tx_buffer)) {
+        LOG_ERROR("ftdi_friend tx buffer overrun");
+    }
+
+    buffer_enqueue(
+        &tx_buffer,
+        (tck ? PIN_TCK : 0) |
+        (tms ? PIN_TMS : 0) |
+        (tdi ? PIN_TDI : 0) |
+        PIN_TRST |
+        PIN_SRST
+    );
+}
+
 static int ftdi_friend_speed(int speed)
 {
     return ERROR_OK;
@@ -218,6 +234,13 @@ static int handle_sleep(struct jtag_command *cmd)
 
 static int handle_stableclocks(struct jtag_command *cmd)
 {
+    int tms = tap_get_state() == TAP_RESET;
+    int num_cycles = cmd->cmd.stableclocks->num_cycles;
+    for (int i = 0; i < num_cycles; ++i)
+    {
+        write_data_pins(1, tms, 0);
+        write_data_pins(0, tms, 0);
+    }
     return ERROR_OK;
 }
 
