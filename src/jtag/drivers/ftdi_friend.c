@@ -215,14 +215,22 @@ static void write_reset_pins(int trst, int srst)
     );
 }
 
+static void clock_data(int tms, int tdi) {
+    write_data_pins(0, tms, tdi);
+    write_data_pins(1, tms, tdi);
+}
+
+static void idle(void) {
+    write_data_pins(0, 0, 0);
+}
+
 static void write_tms_pulse_train(uint8_t data, int count)
 {
     assert(count <= 8);
     for (int i = 0; i < count; ++i, data >>= 1) {
-        write_data_pins(0, data & 1, 0);
-        write_data_pins(1, data & 1, 0);
+        clock_data(data & 1, 0);
     }
-    write_data_pins(0, 0, 0);
+    idle();
 }
 
 static void state_transition(void)
@@ -309,13 +317,12 @@ static int handle_pathmove(struct jtag_command *cmd)
         int tms = tap_state_transition(tap_get_state(), true) == pm->path[i];
         assert(tms || (tap_state_transition(tap_get_state(), false) == pm->path[i]));
 
-        write_data_pins(0, tms, 0);
-        write_data_pins(1, tms, 0);
+        clock_data(tms, 0);
 
         tap_set_state(pm->path[i]);
     }
 
-    write_data_pins(0, 0, 0);
+    idle();
 
     return ERROR_OK;
 }
@@ -332,8 +339,7 @@ static int handle_stableclocks(struct jtag_command *cmd)
     int num_cycles = cmd->cmd.stableclocks->num_cycles;
     for (int i = 0; i < num_cycles; ++i)
     {
-        write_data_pins(1, tms, 0);
-        write_data_pins(0, tms, 0);
+        clock_data(tms, 0);
     }
     return ERROR_OK;
 }
@@ -344,10 +350,10 @@ static int handle_tms(struct jtag_command *cmd)
 
     for (unsigned i = 0; i < tms->num_bits; ++i) {
         int bit = (tms->bits[i / 8] >> (i % 8)) & 1;
-        write_data_pins(0, bit, 0);
-        write_data_pins(1, bit, 0);
+        clock_data(bit, 0);
     }
-    write_data_pins(0, 0, 0);
+
+    idle();
 
     tap_set_state(tap_get_end_state());
 
