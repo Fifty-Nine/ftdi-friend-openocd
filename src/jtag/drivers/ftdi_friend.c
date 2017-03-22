@@ -72,6 +72,15 @@ static const uint8_t ftdi_output_mask =
 
 static uint8_t latency_timer = 1;
 
+enum { buffer_size = 64 };
+struct buffer {
+    uint8_t data[buffer_size];
+    uint8_t available;
+};
+
+static struct buffer tx_buffer;
+static struct buffer rx_buffer;
+
 static int on_ftdi_error(const char *when)
 {
     LOG_ERROR("libftdi call failed: %s: %s", when, ftdi_get_error_string(ftdi));
@@ -79,6 +88,48 @@ static int on_ftdi_error(const char *when)
     ftdi = NULL;
     return ERROR_FAIL;
 }
+
+static void on_ftdi_warning(const char *when)
+{
+    LOG_WARNING("libftdi call failed: %s: %s", when, ftdi_get_error_string(ftdi));
+}
+
+static int buffer_empty(struct buffer *buf)
+{
+    return buf->available == 0;
+}
+
+static int buffer_full(struct buffer *buf)
+{
+    return buf->available == sizeof(buf->data);
+}
+
+static void buffer_enqueue(struct buffer *buf, uint8_t data)
+{
+    if (buf->available == sizeof(buf->data)) {
+        LOG_ERROR("ftdi_friend xmit buffer overflow");
+        return;
+    }
+    buf->data[buf->available++] = data;
+}
+
+static void flush_buffers(void)
+{
+    if (buffer_empty(&tx_buffer)) return;
+    if (ftdi_write_data(ftdi, tx_buffer.data, tx_buffer.available) < 0) {
+        on_ftdi_warning("ftdi_write_data");
+    }
+    tx_buffer.available = 0;
+
+    int rc = ftdi_read_data(ftdi, rx_buffer.data, buffer_size);
+    if (rc < 0) {
+        on_ftdi_warning("ftdi_read_data");
+        rx_buffer.available = 0;
+    } else {
+        rx_buffer.available = (uint8_t)rc;
+    }
+}
+
 
 static int ftdi_friend_init(void)
 {
