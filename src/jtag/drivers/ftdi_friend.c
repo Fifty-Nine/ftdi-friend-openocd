@@ -70,6 +70,7 @@ enum ft232r_pins {
 static const uint8_t ftdi_output_mask =
     PIN_TDI | PIN_TMS | PIN_TCK | PIN_TRST | PIN_SRST;
 
+static uint8_t latency_timer = 1;
 
 static int on_ftdi_error(const char *when)
 {
@@ -93,6 +94,10 @@ static int ftdi_friend_init(void)
 
     if ((rc = ftdi_set_bitmode(ftdi, ftdi_output_mask, BITMODE_SYNCBB))) {
         return on_ftdi_error("ftdi_set_bitmode");
+    }
+
+    if ((rc = ftdi_set_latency_timer(ftdi, latency_timer))) {
+        return on_ftdi_error("ftdi_set_latency_timer");
     }
     return ERROR_OK;
 }
@@ -131,7 +136,26 @@ static int ftdi_friend_execute_queue(void)
     return ERROR_OK;
 }
 
+COMMAND_HANDLER(ftdi_friend_set_latency_timer)
+{
+    if (CMD_ARGC != 1) {
+        LOG_ERROR("ftdi_friend_set_latency_timer expects one argument "
+                  "in the range [0-255]");
+        return ERROR_OK;
+    }
+
+    COMMAND_PARSE_NUMBER(u8, CMD_ARGV[0], latency_timer);
+    return ERROR_OK;
+}
+
 static const struct command_registration ftdi_friend_command_handlers[] = {
+    {
+        .name = "ftdi_friend_latency_timer",
+        .handler = ftdi_friend_set_latency_timer,
+        .mode = COMMAND_CONFIG,
+        .help = "Set the latency timer parameter in the FTDI API.",
+        .usage = "ftdi_friend_latency_timer [time]"
+    },
     COMMAND_REGISTRATION_DONE
 };
 
