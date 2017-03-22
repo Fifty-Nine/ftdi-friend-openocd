@@ -72,10 +72,11 @@ static const uint8_t ftdi_output_mask =
 
 static uint8_t latency_timer = 1;
 
-enum { buffer_size = 64 };
+enum { buffer_size = 1 << 12, frame_size = 1 << 8 };
+
 struct buffer {
     uint8_t data[buffer_size];
-    uint8_t available;
+    uint16_t available;
 };
 
 static struct buffer tx_buffer;
@@ -106,7 +107,7 @@ static int buffer_full(struct buffer *buf)
 
 static void buffer_enqueue(struct buffer *buf, uint8_t data)
 {
-    if (buf->available == sizeof(buf->data)) {
+    if (buffer_full(buf)) {
         LOG_ERROR("ftdi_friend xmit buffer overflow");
         return;
     }
@@ -116,17 +117,28 @@ static void buffer_enqueue(struct buffer *buf, uint8_t data)
 static void flush_buffers(void)
 {
     if (buffer_empty(&tx_buffer)) return;
-    if (ftdi_write_data(ftdi, tx_buffer.data, tx_buffer.available) < 0) {
-        on_ftdi_warning("ftdi_write_data");
-    }
-    tx_buffer.available = 0;
 
-    int rc = ftdi_read_data(ftdi, rx_buffer.data, buffer_size);
-    if (rc < 0) {
-        on_ftdi_warning("ftdi_read_data");
-        rx_buffer.available = 0;
-    } else {
-        rx_buffer.available = (uint8_t)rc;
+    rx_buffer.available = 0;
+    uint8_t *wr_idx = tx_buffer.data;
+    uint8_t *rd_idx = rx_buffer.data;
+    while (tx_buffer.available) {
+        int wr_count = MIN(frame_size, tx_buffer.available);
+        int rc = ftdi_write_data(ftdi, wr_idx, wr_count);
+        if (rc < 0) {
+            on_ftdi_warning("ftdi_write_data");
+        } else {
+            wr_idx += rc;
+            tx_buffer.available -= rc;
+        }
+
+        int rd_count = MIN(buffer_size, rx_buffer.available + frame_size);
+        rc = ftdi_read_data(ftdi, rd_idx, rd_count);
+        if (rc < 0) {
+            on_ftdi_warning("ftdi_read_data");
+        } else {
+            rd_idx += rc;
+            rx_buffer.available += rc;
+        }
     }
 }
 
@@ -173,10 +185,6 @@ static int ftdi_friend_quit(void)
 
 static void write_data_pins(int tck, int tms, int tdi)
 {
-    if (buffer_full(&tx_buffer)) {
-        LOG_ERROR("ftdi_friend tx buffer overrun");
-    }
-
     buffer_enqueue(
         &tx_buffer,
         (tck ? PIN_TCK : 0) |
@@ -348,11 +356,11 @@ static int (* const jtag_cmd_handlers[])(struct jtag_command *cmd) = {
 
 static int execute_one_command(struct jtag_command *cmd)
 {
+    assert(buffer_empty(&tx_buffer));
     assert(cmd->type < sizeof(jtag_cmd_handlers));
-    if (!buffer_empty(&tx_buffer)) {
-        flush_buffers();
-    }
-    return jtag_cmd_handlers[cmd->type](cmd);
+    int rc = jtag_cmd_handlers[cmd->type](cmd);
+    flush_buffers();
+    return rc;
 }
 
 static int ftdi_friend_execute_queue(void)
