@@ -55,16 +55,16 @@ enum ft232r_pins {
     PIN_TMS = PIN_CTS,
 
     /*
-     * Using the TRST pin requires soldering an extra wire to the DTR pad on
+     * Using the SRST pin requires soldering an extra wire to the DTR pad on
      * the bottom of the FTDI friend.
      */
-    PIN_TRST = PIN_DTR,
+    PIN_SRST = PIN_DTR,
 
     /*
      * Good luck connecting this pin. You will likely need some kind of
      * specialized equipment like fine-pitch probes or a 28-SSOP test clip.
      */
-    PIN_SRST = PIN_DSR
+    PIN_TRST = PIN_DSR
 };
 
 static const uint8_t ftdi_output_mask =
