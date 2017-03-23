@@ -72,7 +72,7 @@ static const uint8_t ftdi_output_mask =
 
 static uint8_t latency_timer = 1;
 
-enum { buffer_size = 1 << 12, frame_size = 1 << 8 };
+enum { buffer_size = 1 << 14, frame_size = 3 << 6 };
 
 struct buffer {
     uint8_t data[buffer_size];
