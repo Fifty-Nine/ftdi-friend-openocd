@@ -161,7 +161,7 @@ static int ftdi_friend_init(void)
         return on_ftdi_error("ftdi_set_latency_timer");
     }
 
-    if (ftdi_set_baudrate(ftdi, 11520)) {
+    if (ftdi_set_baudrate(ftdi, jtag_get_speed_khz())) {
         return on_ftdi_error("ftdi_set_baudrate");
     }
 
@@ -252,16 +252,23 @@ static void state_transition(void)
 
 static int ftdi_friend_speed(int speed)
 {
+    ftdi_set_baudrate(ftdi, speed);
     return ERROR_OK;
 }
 
 static int ftdi_friend_speed_div(int speed, int *khz)
 {
+    *khz = speed;
     return ERROR_OK;
 }
 
 static int ftdi_friend_khz(int khz, int *jtag_speed)
 {
+    if (khz == 0) {
+        LOG_ERROR("RTCK not supported.");
+        return ERROR_FAIL;
+    }
+    *jtag_speed = khz;
     return ERROR_OK;
 }
 
