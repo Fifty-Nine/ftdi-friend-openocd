@@ -223,13 +223,21 @@ static void write_pulse_train_full(
     const uint8_t *tms_data, const uint8_t *tdi_data, int count,
     bit_extractor tms_extractor, bit_extractor tdi_extractor)
 {
+    if (count > buffer_size) {
+        LOG_WARNING("Beginning long read of size %d", count);
+    }
+    int last_tms = 0;
     for (int i = 0; i < count; ++i)
     {
-        int tms = tms_extractor(tms_data, i);
+        int tms = last_tms = tms_extractor(tms_data, i);
         int tdi = tdi_extractor(tdi_data, i);
         clock_data(tms, tdi);
+
+        if (count > buffer_size && (i % buffer_size) == 0) {
+            LOG_WARNING("%d of %d bytes written (%f%%)", i, count, i * 100.0f / count);
+        }
     }
-    idle();
+    write_data_pins(0, last_tms, 0);
 }
 
 static void write_pulse_train(const uint8_t *tms_data, const uint8_t *tdi_data, int count)
@@ -239,14 +247,22 @@ static void write_pulse_train(const uint8_t *tms_data, const uint8_t *tdi_data, 
     );
 }
 
-static void state_transition(void)
+static void state_transition_full(tap_state_t end_state, int skip)
 {
-    uint8_t data = tap_get_tms_path(tap_get_state(), tap_get_end_state());
-    int count = tap_get_tms_path_len(tap_get_state(), tap_get_end_state());
+    int data = tap_get_tms_path(tap_get_state(), end_state);
+    int count = tap_get_tms_path_len(tap_get_state(), end_state) - skip;
 
-    write_pulse_train(&data, NULL, count);
+    int extractor(const uint8_t* d, int idx) {
+        return (data >> (idx + skip)) & 0x01;
+    }
 
-    tap_set_state(tap_get_end_state());
+    write_pulse_train_full((uint8_t*)&data, NULL, count, extractor, default_extractor);
+
+    tap_set_state(end_state);
+}
+
+static void state_transition(void) {
+    state_transition_full(tap_get_end_state(), 0);
 }
 
 static int ftdi_friend_speed(int speed)
@@ -279,7 +295,7 @@ static void read_rx_buffer(uint8_t *scan_buffer, int scan_size, int skip)
      * rx buffer is organized with two samples per clock, and we want
      * the data on the rising clock edge, so offset by one.
      */
-    const uint8_t *rx_head = rx_buffer.data + 1 + skip;
+    const uint8_t *rx_head = rx_buffer.data + skip;
     uint8_t *out_head = scan_buffer;
     const int bytes = scan_size / CHAR_BIT;
 
@@ -302,24 +318,20 @@ static int handle_scan(struct jtag_command *cmd)
     int scan_size = jtag_build_buffer(scan, &scan_buffer);
     enum scan_type type = jtag_scan_type(scan);
 
-    __auto_type saved_end_state = tap_get_end_state();
-
-    if ((scan->ir_scan || (tap_get_state() != TAP_DRSHIFT)) &&
-        (!scan->ir_scan || (tap_get_state() != TAP_IRSHIFT)))
-    {
-        tap_set_end_state(scan->ir_scan ? TAP_IRSHIFT : TAP_DRSHIFT);
-        state_transition();
-        tap_set_end_state(saved_end_state);
+    if (scan->ir_scan && (tap_get_state() != TAP_IRSHIFT)) {
+        state_transition_full(TAP_IRSHIFT, 0);
+    } else if (!scan->ir_scan && (tap_get_state() != TAP_DRSHIFT)) {
+        state_transition_full(TAP_DRSHIFT, 0);
     }
 
-    int skip = tx_buffer.available;
-
+    int skip = tx_buffer.available + 2;
     {
         int tms_extractor(const uint8_t *data, int idx) {
             return idx == (scan_size - 1);
         }
         int tdi_extractor(const uint8_t *data, int idx) {
-            return (type != SCAN_IN) && default_extractor(data, idx);
+            return (type == SCAN_OUT || type == SCAN_IO) &&
+                default_extractor(data, idx);
         }
 
         write_pulse_train_full(
@@ -328,11 +340,11 @@ static int handle_scan(struct jtag_command *cmd)
     }
 
     if (tap_get_state() != tap_get_end_state()) {
-        state_transition();
+        state_transition_full(tap_get_end_state(), 1);
     }
     flush_buffers();
 
-    if (type != SCAN_OUT) {
+    if (type == SCAN_IN || type == SCAN_IO) {
         read_rx_buffer(scan_buffer, scan_size, skip);
     }
 
@@ -359,18 +371,16 @@ static int handle_tlr_reset(struct jtag_command *cmd)
 static int handle_runtest(struct jtag_command *cmd)
 {
     __auto_type rt = cmd->cmd.runtest;
-    assert(tap_is_state_stable(rt->end_state));
-    tap_set_end_state(rt->end_state);
-
     if (tap_get_state() != TAP_IDLE) {
-        tap_set_end_state(TAP_IDLE);
-        state_transition();
+        state_transition_full(TAP_IDLE, 0);
     }
 
     write_pulse_train(NULL, NULL, rt->num_cycles);
 
+    idle();
+
     tap_set_end_state(rt->end_state);
-    if (tap_get_state() != tap_get_end_state()) {
+    if (tap_get_state() != rt->end_state) {
         state_transition();
     }
 
@@ -403,8 +413,6 @@ static int handle_pathmove(struct jtag_command *cmd)
 
     write_pulse_train_full(NULL, NULL, pm->num_states, path_extractor, NULL);
 
-    idle();
-
     return ERROR_OK;
 }
 
@@ -431,8 +439,6 @@ static int handle_tms(struct jtag_command *cmd)
     __auto_type tms = cmd->cmd.tms;
 
     write_pulse_train(tms->bits, NULL, tms->num_bits);
-
-    idle();
 
     tap_set_state(tap_get_end_state());
 
