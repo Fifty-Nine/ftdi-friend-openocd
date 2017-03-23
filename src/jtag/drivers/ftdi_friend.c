@@ -105,15 +105,6 @@ static int buffer_full(struct buffer *buf)
     return buf->available == sizeof(buf->data);
 }
 
-static void buffer_enqueue(struct buffer *buf, uint8_t data)
-{
-    if (buffer_full(buf)) {
-        LOG_ERROR("ftdi_friend xmit buffer overflow");
-        return;
-    }
-    buf->data[buf->available++] = data;
-}
-
 static void flush_buffers(void)
 {
     if (buffer_empty(&tx_buffer)) return;
@@ -142,6 +133,14 @@ static void flush_buffers(void)
     }
 }
 
+static void buffer_enqueue(struct buffer *buf, uint8_t data)
+{
+    if (buffer_full(buf)) {
+        LOG_WARNING("ftdi_friend xmit buffer overflow");
+        flush_buffers();
+    }
+    buf->data[buf->available++] = data;
+}
 
 static int ftdi_friend_init(void)
 {
