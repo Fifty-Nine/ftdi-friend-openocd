@@ -95,16 +95,6 @@ static void on_ftdi_warning(const char *when)
     LOG_WARNING("libftdi call failed: %s: %s", when, ftdi_get_error_string(ftdi));
 }
 
-static void log_modem_status(void)
-{
-    if (!LOG_LEVEL_IS(LOG_LVL_DEBUG)) { return; }
-    uint16_t status;
-    if (ftdi_poll_modem_status(ftdi, &status)) {
-        on_ftdi_warning("ftdi_poll_modem_status");
-    }
-    LOG_DEBUG("modem status: %d %4.4x", tx_buffer.available, status);
-}
-
 static int buffer_empty(struct buffer *buf)
 {
     return buf->available == 0;
@@ -175,8 +165,6 @@ static int ftdi_friend_init(void)
     if (ftdi_set_baudrate(ftdi, 11520)) {
         return on_ftdi_error("ftdi_set_baudrate");
     }
-
-    log_modem_status();
 
     return ERROR_OK;
 }
@@ -461,7 +449,6 @@ static int execute_one_command(struct jtag_command *cmd)
     assert(cmd->type < sizeof(jtag_cmd_handlers));
     int rc = jtag_cmd_handlers[cmd->type](cmd);
     flush_buffers();
-    log_modem_status();
     return rc;
 }
 
