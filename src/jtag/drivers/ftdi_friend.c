@@ -111,7 +111,9 @@ static void flush_buffers(void)
 
     rx_buffer.available = 0;
     uint8_t *wr_idx = tx_buffer.data;
-    uint8_t *rd_idx = rx_buffer.data;
+
+    uint8_t rd_frame[frame_size];
+    uint16_t rd_count = 0;
     while (tx_buffer.available) {
         int wr_count = MIN(frame_size, tx_buffer.available);
         int rc = ftdi_write_data(ftdi, wr_idx, wr_count);
@@ -122,14 +124,17 @@ static void flush_buffers(void)
             tx_buffer.available -= rc;
         }
 
-        int rd_count = MIN(buffer_size, rx_buffer.available + frame_size);
-        rc = ftdi_read_data(ftdi, rd_idx, rd_count);
+        rc = ftdi_read_data(ftdi, rd_frame, rc);
         if (rc < 0) {
             on_ftdi_warning("ftdi_read_data");
-        } else {
-            rd_idx += rc;
-            rx_buffer.available += rc;
         }
+
+        for (int i = 0; i < rc; ++i) {
+            if (tx_buffer.data[i + rd_count] & PIN_TDO) {
+                rx_buffer.data[rx_buffer.available++] = !!(rd_frame[i] & PIN_TDO);
+            }
+        }
+        rd_count += rc;
     }
 }
 
@@ -180,13 +185,14 @@ static int ftdi_friend_quit(void)
     return ERROR_OK;
 }
 
-static void write_data_pins(int tck, int tms, int tdi)
+static void write_data_pins(int tck, int tms, int tdi, int tdo_req)
 {
     buffer_enqueue(
         &tx_buffer,
         (tck ? PIN_TCK : 0) |
         (tms ? PIN_TMS : 0) |
         (tdi ? PIN_TDI : 0) |
+        (tdo_req ? PIN_TDO : 0) |
         PIN_TRST |
         PIN_SRST
     );
@@ -201,13 +207,13 @@ static void write_reset_pins(int trst, int srst)
     );
 }
 
-static void clock_data(int tms, int tdi) {
-    write_data_pins(0, tms, tdi);
-    write_data_pins(1, tms, tdi);
+static void clock_data(int tms, int tdi, int tdo_req) {
+    write_data_pins(0, tms, tdi, 0);
+    write_data_pins(1, tms, tdi, tdo_req);
 }
 
 static void idle(void) {
-    write_data_pins(0, 0, 0);
+    write_data_pins(0, 0, 0, 0);
 }
 
 typedef int (*bit_extractor)(const uint8_t *data, int bit_idx);
@@ -221,7 +227,8 @@ static int default_extractor(const uint8_t *data, int bit_idx)
 
 static void write_pulse_train_full(
     const uint8_t *tms_data, const uint8_t *tdi_data, int count,
-    bit_extractor tms_extractor, bit_extractor tdi_extractor)
+    bit_extractor tms_extractor, bit_extractor tdi_extractor,
+    int tdo_req)
 {
     if (count > buffer_size) {
         LOG_WARNING("Beginning long read of size %d", count);
@@ -231,19 +238,19 @@ static void write_pulse_train_full(
     {
         int tms = last_tms = tms_extractor(tms_data, i);
         int tdi = tdi_extractor(tdi_data, i);
-        clock_data(tms, tdi);
+        clock_data(tms, tdi, tdo_req);
 
         if (count > buffer_size && (i % buffer_size) == 0) {
             LOG_WARNING("%d of %d bytes written (%f%%)", i, count, i * 100.0f / count);
         }
     }
-    write_data_pins(0, last_tms, 0);
+    write_data_pins(0, last_tms, 0, 0);
 }
 
 static void write_pulse_train(const uint8_t *tms_data, const uint8_t *tdi_data, int count)
 {
     write_pulse_train_full(
-        tms_data, tdi_data, count, default_extractor, default_extractor
+        tms_data, tdi_data, count, default_extractor, default_extractor, 0
     );
 }
 
@@ -256,7 +263,7 @@ static void state_transition_full(tap_state_t end_state, int skip)
         return (data >> (idx + skip)) & 0x01;
     }
 
-    write_pulse_train_full((uint8_t*)&data, NULL, count, extractor, default_extractor);
+    write_pulse_train_full((uint8_t*)&data, NULL, count, extractor, default_extractor, 0);
 
     tap_set_state(end_state);
 }
@@ -289,21 +296,21 @@ static int ftdi_friend_khz(int khz, int *jtag_speed)
     return ERROR_OK;
 }
 
-static void read_rx_buffer(uint8_t *scan_buffer, int scan_size, int skip)
+static void read_rx_buffer(uint8_t *scan_buffer, int scan_size)
 {
     /*
      * rx buffer is organized with two samples per clock, and we want
      * the data on the rising clock edge, so offset by one.
      */
-    const uint8_t *rx_head = rx_buffer.data + skip;
+    const uint8_t *rx_head = rx_buffer.data;
     uint8_t *out_head = scan_buffer;
     const int bytes = scan_size / CHAR_BIT;
 
     for (int offset = 0; offset < bytes; ++offset) {
         for (int bit = 0; bit < CHAR_BIT; ++bit) {
             *out_head >>= 1;
-            *out_head |= (*rx_head & PIN_TDO) ? 0x80 : 0x00;
-            rx_head += 2;
+            *out_head |= *rx_head ? 0x80 : 0x00;
+            rx_head++;
         }
         ++out_head;
     }
@@ -324,7 +331,6 @@ static int handle_scan(struct jtag_command *cmd)
         state_transition_full(TAP_DRSHIFT, 0);
     }
 
-    int skip = tx_buffer.available + 2;
     {
         int tms_extractor(const uint8_t *data, int idx) {
             return idx == (scan_size - 1);
@@ -335,7 +341,7 @@ static int handle_scan(struct jtag_command *cmd)
         }
 
         write_pulse_train_full(
-            NULL, scan_buffer, scan_size, tms_extractor, tdi_extractor
+            NULL, scan_buffer, scan_size, tms_extractor, tdi_extractor, 1
         );
     }
 
@@ -345,7 +351,7 @@ static int handle_scan(struct jtag_command *cmd)
     flush_buffers();
 
     if (type == SCAN_IN || type == SCAN_IO) {
-        read_rx_buffer(scan_buffer, scan_size, skip);
+        read_rx_buffer(scan_buffer, scan_size);
     }
 
     int rc = (jtag_read_buffer(scan_buffer, scan) == ERROR_OK) ?
@@ -411,7 +417,7 @@ static int handle_pathmove(struct jtag_command *cmd)
         return rc;
     }
 
-    write_pulse_train_full(NULL, NULL, pm->num_states, path_extractor, NULL);
+    write_pulse_train_full(NULL, NULL, pm->num_states, path_extractor, NULL, 0);
 
     return ERROR_OK;
 }
@@ -429,7 +435,7 @@ static int handle_stableclocks(struct jtag_command *cmd)
 
     int extractor(const uint8_t* d, int i) { return tms; }
 
-    write_pulse_train_full(NULL, NULL, num_cycles, extractor, NULL);
+    write_pulse_train_full(NULL, NULL, num_cycles, extractor, NULL, 0);
 
     return ERROR_OK;
 }
@@ -499,6 +505,8 @@ static const struct command_registration ftdi_friend_command_handlers[] = {
 };
 
 static const char * const ftdi_friend_transports[] = { NULL };
+
+
 
 struct jtag_interface ftdi_friend_interface = {
     .name = "ftdi_friend",
