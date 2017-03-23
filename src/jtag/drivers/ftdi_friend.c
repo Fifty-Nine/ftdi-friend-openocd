@@ -136,7 +136,6 @@ static void flush_buffers(void)
 static void buffer_enqueue(struct buffer *buf, uint8_t data)
 {
     if (buffer_full(buf)) {
-        LOG_WARNING("ftdi_friend xmit buffer overflow");
         flush_buffers();
     }
     buf->data[buf->available++] = data;
