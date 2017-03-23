@@ -251,7 +251,9 @@ static void state_transition(void)
 
 static int ftdi_friend_speed(int speed)
 {
-    ftdi_set_baudrate(ftdi, speed);
+    if (ftdi_set_baudrate(ftdi, speed)) {
+        on_ftdi_warning("ftdi_set_baudrate");
+    }
     return ERROR_OK;
 }
 
