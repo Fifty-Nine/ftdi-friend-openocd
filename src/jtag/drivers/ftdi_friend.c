@@ -25,6 +25,7 @@
 
 #include <jtag/interface.h>
 #include <jtag/commands.h>
+#include <jtag/drivers/bitq.h>
 #include <ftdi.h>
 
 struct ftdi_context *ftdi;
@@ -72,7 +73,7 @@ static const uint8_t ftdi_output_mask =
 
 static uint8_t latency_timer = 1;
 
-enum { buffer_size = 1 << 14, frame_size = 3 << 6 };
+enum { buffer_size = 1 << 14, frame_size = 1 << 8 };
 
 struct buffer {
     uint8_t data[buffer_size];
@@ -81,6 +82,7 @@ struct buffer {
 
 static struct buffer tx_buffer;
 static struct buffer rx_buffer;
+uint16_t rx_idx = 0;
 
 static int on_ftdi_error(const char *when)
 {
@@ -93,6 +95,8 @@ static int on_ftdi_error(const char *when)
 static void on_ftdi_warning(const char *when)
 {
     LOG_WARNING("libftdi call failed: %s: %s", when, ftdi_get_error_string(ftdi));
+    tx_buffer.available = 0;
+    rx_buffer.available = 0;
 }
 
 static int buffer_empty(struct buffer *buf)
@@ -105,36 +109,62 @@ static int buffer_full(struct buffer *buf)
     return buf->available == sizeof(buf->data);
 }
 
-static void flush_buffers(void)
+static int flush_buffers(void)
 {
-    if (buffer_empty(&tx_buffer)) return;
+    if (buffer_empty(&tx_buffer)) return ERROR_OK;
 
-    rx_buffer.available = 0;
+    int num_to_write = tx_buffer.available;
+    int num_to_read = tx_buffer.available;
     uint8_t *wr_idx = tx_buffer.data;
+    uint8_t *rwr_idx = tx_buffer.data;
+    uint8_t *rd_idx = rx_buffer.data;
 
-    uint8_t rd_frame[frame_size];
-    uint16_t rd_count = 0;
-    while (tx_buffer.available) {
-        int wr_count = MIN(frame_size, tx_buffer.available);
-        int rc = ftdi_write_data(ftdi, wr_idx, wr_count);
-        if (rc < 0) {
-            on_ftdi_warning("ftdi_write_data");
-        } else {
-            wr_idx += rc;
-            tx_buffer.available -= rc;
+    uint8_t rd_buffer[frame_size];
+    rx_idx = 0;
+    tx_buffer.available = 0;
+
+    while (1) {
+        struct ftdi_transfer_control *wtc = NULL;
+        struct ftdi_transfer_control *rtc = NULL;
+
+        if (num_to_write > 0) {
+            wtc = ftdi_write_data_submit(ftdi, wr_idx, MIN(frame_size, num_to_write));
         }
 
-        rc = ftdi_read_data(ftdi, rd_frame, rc);
-        if (rc < 0) {
-            on_ftdi_warning("ftdi_read_data");
+        if (num_to_read > 0) {
+            rtc = ftdi_read_data_submit(ftdi, rd_buffer, MIN(frame_size, num_to_read));
         }
 
-        for (int i = 0; i < rc; ++i) {
-            if (tx_buffer.data[i + rd_count] & PIN_TDO) {
-                rx_buffer.data[rx_buffer.available++] = !!(rd_frame[i] & PIN_TDO);
+        if (!wtc && !rtc) return ERROR_OK;
+
+        if (wtc) {
+            int rc = ftdi_transfer_data_done(wtc);
+            if (rc < 0) {
+                on_ftdi_warning("write");
+                return ERROR_FAIL;
             }
+            num_to_write -= rc;
+            wr_idx += rc;
         }
-        rd_count += rc;
+
+        if (rtc) {
+            int rc = ftdi_transfer_data_done(rtc);
+            if (rc < 0) {
+                on_ftdi_warning("read");
+                return ERROR_FAIL;
+            }
+
+            for (int i = 0; i < rc; ++i, ++rwr_idx)
+            {
+                if (*rwr_idx & PIN_TDO) {
+                    *rd_idx = !!(rd_buffer[i] & PIN_TDO);
+                    ++rd_idx;
+                    rx_buffer.available++;
+                }
+            }
+            num_to_read -= rc;
+        }
+
     }
 }
 
@@ -144,32 +174,6 @@ static void buffer_enqueue(struct buffer *buf, uint8_t data)
         flush_buffers();
     }
     buf->data[buf->available++] = data;
-}
-
-static int ftdi_friend_init(void)
-{
-    if ((ftdi = ftdi_new()) == 0) {
-        LOG_ERROR("ftdi_new failed");
-        return ERROR_FAIL;
-    }
-
-    if (ftdi_usb_open(ftdi, ftdi_friend_vid, ftdi_friend_pid)) {
-        return on_ftdi_error("ftdi_usb_open");
-    }
-
-    if (ftdi_set_bitmode(ftdi, ftdi_output_mask, BITMODE_SYNCBB)) {
-        return on_ftdi_error("ftdi_set_bitmode");
-    }
-
-    if ( ftdi_set_latency_timer(ftdi, latency_timer)) {
-        return on_ftdi_error("ftdi_set_latency_timer");
-    }
-
-    if (ftdi_set_baudrate(ftdi, jtag_get_speed_khz())) {
-        return on_ftdi_error("ftdi_set_baudrate");
-    }
-
-    return ERROR_OK;
 }
 
 static int ftdi_friend_quit(void)
@@ -198,78 +202,26 @@ static void write_data_pins(int tck, int tms, int tdi, int tdo_req)
     );
 }
 
-static void write_reset_pins(int trst, int srst)
+static int write_reset_pins(int trst, int srst)
 {
     buffer_enqueue(
         &tx_buffer,
         (trst ? 0 : PIN_TRST) |
         (srst ? 0 : PIN_SRST)
     );
+    return ERROR_OK;
 }
 
-static void clock_data(int tms, int tdi, int tdo_req) {
+static int clock_data(int tms, int tdi, int tdo_req) {
     write_data_pins(0, tms, tdi, 0);
     write_data_pins(1, tms, tdi, tdo_req);
+    return ERROR_OK;
 }
 
-static void idle(void) {
+__attribute__((unused))
+static void idle(void)
+{
     write_data_pins(0, 0, 0, 0);
-}
-
-typedef int (*bit_extractor)(const uint8_t *data, int bit_idx);
-
-static int default_extractor(const uint8_t *data, int bit_idx)
-{
-    int offset = bit_idx / 8;
-    int shift = bit_idx % 8;
-    return data && ((data[offset] >> shift) & 0x01);
-}
-
-static void write_pulse_train_full(
-    const uint8_t *tms_data, const uint8_t *tdi_data, int count,
-    bit_extractor tms_extractor, bit_extractor tdi_extractor,
-    int tdo_req)
-{
-    if (count > buffer_size) {
-        LOG_WARNING("Beginning long read of size %d", count);
-    }
-    int last_tms = 0;
-    for (int i = 0; i < count; ++i)
-    {
-        int tms = last_tms = tms_extractor(tms_data, i);
-        int tdi = tdi_extractor(tdi_data, i);
-        clock_data(tms, tdi, tdo_req);
-
-        if (count > buffer_size && (i % buffer_size) == 0) {
-            LOG_WARNING("%d of %d bytes written (%f%%)", i, count, i * 100.0f / count);
-        }
-    }
-    write_data_pins(0, last_tms, 0, 0);
-}
-
-static void write_pulse_train(const uint8_t *tms_data, const uint8_t *tdi_data, int count)
-{
-    write_pulse_train_full(
-        tms_data, tdi_data, count, default_extractor, default_extractor, 0
-    );
-}
-
-static void state_transition_full(tap_state_t end_state, int skip)
-{
-    int data = tap_get_tms_path(tap_get_state(), end_state);
-    int count = tap_get_tms_path_len(tap_get_state(), end_state) - skip;
-
-    int extractor(const uint8_t* d, int idx) {
-        return (data >> (idx + skip)) & 0x01;
-    }
-
-    write_pulse_train_full((uint8_t*)&data, NULL, count, extractor, default_extractor, 0);
-
-    tap_set_state(end_state);
-}
-
-static void state_transition(void) {
-    state_transition_full(tap_get_end_state(), 0);
 }
 
 static int ftdi_friend_speed(int speed)
@@ -296,191 +248,6 @@ static int ftdi_friend_khz(int khz, int *jtag_speed)
     return ERROR_OK;
 }
 
-static void read_rx_buffer(uint8_t *scan_buffer, int scan_size)
-{
-    /*
-     * rx buffer is organized with two samples per clock, and we want
-     * the data on the rising clock edge, so offset by one.
-     */
-    const uint8_t *rx_head = rx_buffer.data;
-    uint8_t *out_head = scan_buffer;
-    const int bytes = scan_size / CHAR_BIT;
-
-    for (int offset = 0; offset < bytes; ++offset) {
-        for (int bit = 0; bit < CHAR_BIT; ++bit) {
-            *out_head >>= 1;
-            *out_head |= *rx_head ? 0x80 : 0x00;
-            rx_head++;
-        }
-        ++out_head;
-    }
-}
-
-static int handle_scan(struct jtag_command *cmd)
-{
-    __auto_type scan = cmd->cmd.scan;
-
-    tap_set_end_state(scan->end_state);
-    uint8_t *scan_buffer;
-    int scan_size = jtag_build_buffer(scan, &scan_buffer);
-    enum scan_type type = jtag_scan_type(scan);
-
-    if (scan->ir_scan && (tap_get_state() != TAP_IRSHIFT)) {
-        state_transition_full(TAP_IRSHIFT, 0);
-    } else if (!scan->ir_scan && (tap_get_state() != TAP_DRSHIFT)) {
-        state_transition_full(TAP_DRSHIFT, 0);
-    }
-
-    {
-        int tms_extractor(const uint8_t *data, int idx) {
-            return idx == (scan_size - 1);
-        }
-        int tdi_extractor(const uint8_t *data, int idx) {
-            return (type == SCAN_OUT || type == SCAN_IO) &&
-                default_extractor(data, idx);
-        }
-
-        write_pulse_train_full(
-            NULL, scan_buffer, scan_size, tms_extractor, tdi_extractor, 1
-        );
-    }
-
-    if (tap_get_state() != tap_get_end_state()) {
-        state_transition_full(tap_get_end_state(), 1);
-    }
-    flush_buffers();
-
-    if (type == SCAN_IN || type == SCAN_IO) {
-        read_rx_buffer(scan_buffer, scan_size);
-    }
-
-    int rc = (jtag_read_buffer(scan_buffer, scan) == ERROR_OK) ?
-        ERROR_OK : ERROR_JTAG_QUEUE_FAILED;
-
-    free(scan_buffer);
-
-    return rc;
-}
-
-static int handle_tlr_reset(struct jtag_command *cmd)
-{
-    __auto_type sm = cmd->cmd.statemove;
-
-    assert(tap_is_state_stable(sm->end_state));
-    tap_set_end_state(sm->end_state);
-
-    state_transition();
-
-    return ERROR_OK;
-}
-
-static int handle_runtest(struct jtag_command *cmd)
-{
-    __auto_type rt = cmd->cmd.runtest;
-    if (tap_get_state() != TAP_IDLE) {
-        state_transition_full(TAP_IDLE, 0);
-    }
-
-    write_pulse_train(NULL, NULL, rt->num_cycles);
-
-    idle();
-
-    tap_set_end_state(rt->end_state);
-    if (tap_get_state() != rt->end_state) {
-        state_transition();
-    }
-
-    return ERROR_OK;
-}
-
-static int handle_reset(struct jtag_command *cmd)
-{
-    __auto_type reset = cmd->cmd.reset;
-
-    if (reset->trst ||
-        (reset->srst && (jtag_get_reset_config() & RESET_SRST_PULLS_TRST))) {
-        tap_set_state(TAP_RESET);
-    }
-    write_reset_pins(reset->trst, reset->srst);
-
-    return ERROR_OK;
-}
-
-static int handle_pathmove(struct jtag_command *cmd)
-{
-    __auto_type pm = cmd->cmd.pathmove;
-
-    int path_extractor(const uint8_t *data, int idx) {
-        int rc = tap_state_transition(tap_get_state(), true) == pm->path[idx];
-        assert(rc || (tap_state_transition(tap_get_state(), false) == pm->path[idx]));
-        tap_set_state(pm->path[idx]);
-        return rc;
-    }
-
-    write_pulse_train_full(NULL, NULL, pm->num_states, path_extractor, NULL, 0);
-
-    return ERROR_OK;
-}
-
-static int handle_sleep(struct jtag_command *cmd)
-{
-    jtag_sleep(cmd->cmd.sleep->us);
-    return ERROR_OK;
-}
-
-static int handle_stableclocks(struct jtag_command *cmd)
-{
-    int tms = tap_get_state() == TAP_RESET;
-    int num_cycles = cmd->cmd.stableclocks->num_cycles;
-
-    int extractor(const uint8_t* d, int i) { return tms; }
-
-    write_pulse_train_full(NULL, NULL, num_cycles, extractor, NULL, 0);
-
-    return ERROR_OK;
-}
-
-static int handle_tms(struct jtag_command *cmd)
-{
-    __auto_type tms = cmd->cmd.tms;
-
-    write_pulse_train(tms->bits, NULL, tms->num_bits);
-
-    tap_set_state(tap_get_end_state());
-
-    return ERROR_OK;
-}
-
-static int (* const jtag_cmd_handlers[])(struct jtag_command *cmd) = {
-    [JTAG_SCAN]         = handle_scan,
-    [JTAG_TLR_RESET]    = handle_tlr_reset,
-    [JTAG_RUNTEST]      = handle_runtest,
-    [JTAG_RESET]        = handle_reset,
-    [JTAG_PATHMOVE]     = handle_pathmove,
-    [JTAG_SLEEP]        = handle_sleep,
-    [JTAG_STABLECLOCKS] = handle_stableclocks,
-    [JTAG_TMS]          = handle_tms,
-};
-
-static int execute_one_command(struct jtag_command *cmd)
-{
-    assert(buffer_empty(&tx_buffer));
-    assert(cmd->type < sizeof(jtag_cmd_handlers));
-    int rc = jtag_cmd_handlers[cmd->type](cmd);
-    flush_buffers();
-    return rc;
-}
-
-static int ftdi_friend_execute_queue(void)
-{
-    for (struct jtag_command *cmd = jtag_command_queue;
-         cmd != NULL;
-         cmd = cmd->next) {
-        execute_one_command(cmd);
-    }
-    return ERROR_OK;
-}
-
 COMMAND_HANDLER(ftdi_friend_set_latency_timer)
 {
     if (CMD_ARGC != 1) {
@@ -504,9 +271,65 @@ static const struct command_registration ftdi_friend_command_handlers[] = {
     COMMAND_REGISTRATION_DONE
 };
 
+static int ftdi_friend_sleep(unsigned long us)
+{
+    flush_buffers();
+    jtag_sleep(us);
+    return ERROR_OK;
+}
+
+static int ftdi_in_rdy(void)
+{
+    return rx_buffer.available;
+}
+
+static int ftdi_in(void)
+{
+    if (ftdi_in_rdy() > 0) {
+        rx_buffer.available--;
+        return rx_buffer.data[rx_idx++];
+    }
+    return -1;
+}
+
+static struct bitq_interface ftdi_friend_bitq = {
+    .out = clock_data,
+    .flush = flush_buffers,
+    .sleep = ftdi_friend_sleep,
+    .reset = write_reset_pins,
+    .in_rdy = ftdi_in_rdy,
+    .in = ftdi_in,
+};
+
+static int ftdi_friend_init(void)
+{
+    if ((ftdi = ftdi_new()) == 0) {
+        LOG_ERROR("ftdi_new failed");
+        return ERROR_FAIL;
+    }
+
+    if (ftdi_usb_open(ftdi, ftdi_friend_vid, ftdi_friend_pid)) {
+        return on_ftdi_error("ftdi_usb_open");
+    }
+
+    if (ftdi_set_bitmode(ftdi, ftdi_output_mask, BITMODE_SYNCBB)) {
+        return on_ftdi_error("ftdi_set_bitmode");
+    }
+
+    if ( ftdi_set_latency_timer(ftdi, latency_timer)) {
+        return on_ftdi_error("ftdi_set_latency_timer");
+    }
+
+    if (ftdi_set_baudrate(ftdi, jtag_get_speed_khz())) {
+        return on_ftdi_error("ftdi_set_baudrate");
+    }
+
+    bitq_interface = &ftdi_friend_bitq;
+    return ERROR_OK;
+}
+
+
 static const char * const ftdi_friend_transports[] = { NULL };
-
-
 
 struct jtag_interface ftdi_friend_interface = {
     .name = "ftdi_friend",
@@ -518,5 +341,5 @@ struct jtag_interface ftdi_friend_interface = {
     .speed = ftdi_friend_speed,
     .speed_div = ftdi_friend_speed_div,
     .khz = ftdi_friend_khz,
-    .execute_queue = ftdi_friend_execute_queue
+    .execute_queue = bitq_execute_queue
 };
