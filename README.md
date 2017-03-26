@@ -180,6 +180,6 @@ This work would not have been possible without the contributions of several peop
 Thanks to Serge Vakulenko for authoring the original FT232RL OpenOCD driver that inspired this
 one--without that driver as a proof of concept, I'd have never written this one. Likewise, thanks
 to Adafruit for providing excellent documentation of the FTDI friend, especially the schematics.
-Finally, shout out to @benjholla for just bein' a good dude.
+Finally, shout out to [@benjholla](https://github.com/benjholla) for just bein' a good dude.
 
 
