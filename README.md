@@ -65,22 +65,22 @@ Now we're ready to use our custom-built OpenOCD, but before we can start we
 need to wire the FTDI Friend to our target. This will of course depend on your
 target, but the FTDI Friend pinout is fixed:
 
-| FTDI Friend Pin | JTAG Pin |
-| --------------- | -------- |
-| RTS             | TDI      |
-| RX              | TCK      |
-| TX              | TDO      |
-| VCC*            | NC       |
-| CTS             | TMS      |
-| GND             | GND      |
-| DTR**           | SRST     |
-| DSR**           | TRST     |
+| FTDI Friend Pin   | JTAG Pin |
+| ----------------- | -------- |
+| RTS               | TDI      |
+| RX                | TCK      |
+| TX                | TDO      |
+| VCC<sup>[1]</sup> | NC       |
+| CTS               | TMS      |
+| GND               | GND      |
+| DTR<sup>[2]</sup> | SRST     |
+| DSR<sup>[2]</sup> | TRST     |
 
-* The FTDI friend could be used to power your target board, but this will depend
-on your power requirements. I haven't experimented with this.
-** By default, the DTR and DSR pins are unconnected on the FTDI friend board. Using
+[1] The FTDI friend could be used to power your target board, but this will depend
+on your power requirements. I haven't experimented with this.<br/>
+[2] By default, the DTR and DSR pins are unconnected on the FTDI friend board. Using
 them requires some creativity, but they typically aren't needed anyway. See the
-SRST and TRST section below for details.
+[SRST and TRST](#srst-and-trst-support) section below for details.
 
 #### Connect the FTDI Friend ####
 
