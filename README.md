@@ -3,7 +3,14 @@
 This repository implements OpenOCD support for the [Adafruit FTDI Friend](https://www.adafruit.com/product/284)
 as a JTAG programmer.
 
-[FTDI Friend programming a Microchip Explorer16 dev board](images/dev-board.jpg)
+![FTDI Friend programming a Microchip Explorer16 dev board](images/dev-board.jpg)
+
+### Table of Contents ###
+
+* [Quickstart Guide](#quickstart-guide)
+* [Background](#background)
+* [SRST and TRST support](#srst-and-trst-support)
+* [Acknowledgements](#acknowledgements)
 
 ### Quickstart Guide ###
 
@@ -57,7 +64,6 @@ We've installed some new shared libraries, so be sure to run ldconfig:
 
 ```
 $ sudo ldconfig
-$
 ```
 
 #### Connect the target board ####
@@ -66,22 +72,22 @@ Now we're ready to use our custom-built OpenOCD, but before we can start we
 need to wire the FTDI Friend to our target. This will of course depend on your
 target, but the FTDI Friend pinout is fixed:
 
-| FTDI Friend Pin | JTAG Pin |
-| --------------- | -------- |
-| RTS             | TDI      |
-| RX              | TCK      |
-| TX              | TDO      |
-| VCC*            | NC       |
-| CTS             | TMS      |
-| GND             | GND      |
-| DTR**           | SRST     |
-| DSR**           | TRST     |
+| FTDI Friend Pin   | JTAG Pin |
+| ----------------- | -------- |
+| RTS               | TDI      |
+| RX                | TCK      |
+| TX                | TDO      |
+| VCC<sup>[1]</sup> | NC       |
+| CTS               | TMS      |
+| GND               | GND      |
+| DTR<sup>[2]</sup> | SRST     |
+| DSR<sup>[2]</sup> | TRST     |
 
-* The FTDI friend could be used to power your target board, but this will depend
-on your power requirements. I haven't experimented with this.
-** By default, the DTR and DSR pins are unconnected on the FTDI friend board. Using
+[1] The FTDI friend could be used to power your target board, but this will depend
+on your power requirements. I haven't experimented with this.<br/>
+[2] By default, the DTR and DSR pins are unconnected on the FTDI friend board. Using
 them requires some creativity, but they typically aren't needed anyway. See the
-SRST and TRST section below for details.
+[SRST and TRST](#srst-and-trst-support) section below for details.
 
 #### Connect the FTDI Friend ####
 
@@ -129,21 +135,6 @@ status (/32): 0x00100001
 
 and so on.
 
-### Background ###
-
-While working on a reverse engineering project, I found myself in need of
-a JTAG programmer. After doing some research, I discovered that OpenOCD has
-support for various FTDI-based USB-to-serial converters. Unfortunately, the one
-I had--the Adafruit FTDI Friend--uses an FT232RL chip, which isn't supported
-by the available OpenOCD drivers.
-
-I found an example of using the FT232RL as a JTAG programmer [here](http://vak.ru/doku.php/proj/bitbang/bitbang-jtag).
-Unfortunately, I wasn't able to get that patch working with a recent OpenOCD version.
-It's possible that my wiring was wrong, or that I had incorrectly resolved the patch
-conflicts, but the relatively small size of the patch encouraged me to develop my own
-solution. Much credit is owed to the author of that work since without it I likely
-wouldn't have even tried.
-
 ### SRST and TRST support ###
 
 The FTDI friend header provides direct access to power, ground and four data lines. However,
@@ -159,7 +150,7 @@ default, pin 6 is shorted to RTS. We can take advantage of these solder pads to 
 the FT232RL's DTR line. We just need to solder a wire onto the pad connected to DTR. Here's
 a picture of what that looks like:
 
-[FTDI friend with DTR wire](images/ftdi-srst.jpg)
+![FTDI friend with DTR wire](images/ftdi-srst.jpg)
 
 Doing the same for TRST is not possible, since it is not connected to the FTDI friend board at
 all. It's probably not worth trying. If you really need TRST for some reason, you could recompile
@@ -168,12 +159,27 @@ Alternatively, you could try using a grabber of some sort, like the [Pomona 7290
 Finally, if you've got some fine-gauge wire and excellent soldering skills, you might try soldering
 directly to the 0.5mm pitch pins of the FT232RL. Good luck!
 
+### Background ###
+
+While working on a reverse engineering project, I found myself in need of
+a JTAG programmer. After doing some research, I discovered that OpenOCD has
+support for various FTDI-based USB-to-serial converters. Unfortunately, the one
+I had--the Adafruit FTDI Friend--uses an FT232RL chip, which isn't supported
+by the available OpenOCD drivers.
+
+I found an example of using the FT232RL as a JTAG programmer [here](http://vak.ru/doku.php/proj/bitbang/bitbang-jtag).
+Unfortunately, I wasn't able to get that patch working with a recent OpenOCD version.
+It's possible that my wiring was wrong, or that I had incorrectly resolved the patch
+conflicts, but the relatively small size of the patch encouraged me to develop my own
+solution. Much credit is owed to the author of that work since without it I likely
+wouldn't have even tried.
+
 ### Acknowledgements ###
 
 This work would not have been possible without the contributions of several people and organizations.
 Thanks to Serge Vakulenko for authoring the original FT232RL OpenOCD driver that inspired this
 one--without that driver as a proof of concept, I'd have never written this one. Likewise, thanks
 to Adafruit for providing excellent documentation of the FTDI friend, especially the schematics.
-
+Finally, shout out to [@benjholla](https://github.com/benjholla) for just bein' a good dude.
 
 
