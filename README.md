@@ -5,6 +5,13 @@ as a JTAG programmer.
 
 ![FTDI Friend programming a Microchip Explorer16 dev board](https://raw.githubusercontent.com/Fifty-Nine/openocd/gh-pages/images/dev-board.jpg)
 
+### Table of Contents ###
+
+* [Quickstart Guide](#quickstart-guide)
+* [Background](#background)
+* [SRST and TRST support](#srst-and-trst-support)
+* [Acknowledgements](#acknowledgements)
+
 ### Quickstart Guide ###
 
 This driver has been tested and confirmed to work on Ubuntu 16.04.2 LTS as
@@ -128,21 +135,6 @@ status (/32): 0x00100001
 
 and so on.
 
-### Background ###
-
-While working on a reverse engineering project, I found myself in need of
-a JTAG programmer. After doing some research, I discovered that OpenOCD has
-support for various FTDI-based USB-to-serial converters. Unfortunately, the one
-I had--the Adafruit FTDI Friend--uses an FT232RL chip, which isn't supported
-by the available OpenOCD drivers.
-
-I found an example of using the FT232RL as a JTAG programmer [here](http://vak.ru/doku.php/proj/bitbang/bitbang-jtag).
-Unfortunately, I wasn't able to get that patch working with a recent OpenOCD version.
-It's possible that my wiring was wrong, or that I had incorrectly resolved the patch
-conflicts, but the relatively small size of the patch encouraged me to develop my own
-solution. Much credit is owed to the author of that work since without it I likely
-wouldn't have even tried.
-
 ### SRST and TRST support ###
 
 The FTDI friend header provides direct access to power, ground and four data lines. However,
@@ -167,11 +159,27 @@ Alternatively, you could try using a grabber of some sort, like the [Pomona 7290
 Finally, if you've got some fine-gauge wire and excellent soldering skills, you might try soldering
 directly to the 0.5mm pitch pins of the FT232RL. Good luck!
 
+### Background ###
+
+While working on a reverse engineering project, I found myself in need of
+a JTAG programmer. After doing some research, I discovered that OpenOCD has
+support for various FTDI-based USB-to-serial converters. Unfortunately, the one
+I had--the Adafruit FTDI Friend--uses an FT232RL chip, which isn't supported
+by the available OpenOCD drivers.
+
+I found an example of using the FT232RL as a JTAG programmer [here](http://vak.ru/doku.php/proj/bitbang/bitbang-jtag).
+Unfortunately, I wasn't able to get that patch working with a recent OpenOCD version.
+It's possible that my wiring was wrong, or that I had incorrectly resolved the patch
+conflicts, but the relatively small size of the patch encouraged me to develop my own
+solution. Much credit is owed to the author of that work since without it I likely
+wouldn't have even tried.
+
 ### Acknowledgements ###
 
 This work would not have been possible without the contributions of several people and organizations.
 Thanks to Serge Vakulenko for authoring the original FT232RL OpenOCD driver that inspired this
 one--without that driver as a proof of concept, I'd have never written this one. Likewise, thanks
 to Adafruit for providing excellent documentation of the FTDI friend, especially the schematics.
+Finally, shout out to @benjholla for just bein' a good dude.
 
 
