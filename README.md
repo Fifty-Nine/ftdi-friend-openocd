@@ -158,7 +158,7 @@ default, pin 6 is shorted to RTS. We can take advantage of these solder pads to 
 the FT232RL's DTR line. We just need to solder a wire onto the pad connected to DTR. Here's
 a picture of what that looks like:
 
-[FTDI friend with DTR wire](https://raw.githubusercontent.com/Fifty-Nine/openocd/gh-pages/images/ftdi-srst.jpg)
+![FTDI friend with DTR wire](https://raw.githubusercontent.com/Fifty-Nine/openocd/gh-pages/images/ftdi-srst.jpg)
 
 Doing the same for TRST is not possible, since it is not connected to the FTDI friend board at
 all. It's probably not worth trying. If you really need TRST for some reason, you could recompile
