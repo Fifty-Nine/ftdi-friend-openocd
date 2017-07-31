@@ -47,14 +47,16 @@ $ sudo make install
 Next, clone the repository:
 
 ```
-$ git clone https://github.com/Fifty-Nine/openocd.git
+$ git clone https://github.com/Fifty-Nine/ftdi-friend-openocd.git
 ```
 
 Configure, build and install the source:
 
 ```
-$ mkdir -p openocd/build
-$ cd openocd/build
+$ mkdir -p ftdi-friend-openocd/build
+$ cd ftdi-friend-openocd
+$ ./bootstrap
+$ cd build
 $ ../configure --enable-ftdi-friend
 $ make
 $ sudo make install
